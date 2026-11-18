@@ -167,6 +167,16 @@ pve-center-clients/
 
 ---
 
+## 🗺️ Feuille de route
+
+- [x] UI partagée React 19 + TypeScript avec URL serveur dynamique, authentification Bearer et Mode Démo
+- [x] Packaging Desktop Tauri v2 pour Windows (`.msi` / `.exe`) et Linux (`.AppImage` / `.deb`) avec icône barre système
+- [x] Wrapper Android Capacitor 8 compatible LAN HTTP et HTTPS Tailscale + compilation CI Gradle
+- [ ] Stockage chiffré des jetons dans le trousseau OS (Credential Manager / libsecret / Android Keystore)
+- [ ] Publication signée & mise à jour automatique (`tauri-plugin-updater`) sur les tags GitHub Release
+
+---
+
 ## Contribution & Sécurité
 
 - Consultez [CONTRIBUTING.md](CONTRIBUTING.md) et le [Code de conduite](CODE_OF_CONDUCT.md) avant de soumettre une Pull Request.

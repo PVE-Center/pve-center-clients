@@ -97,7 +97,6 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '21'
-      - uses: android-actions/setup-android@v3
       - name: Install npm dependencies
         run: npm ci
       - name: Build web assets and sync Capacitor Android

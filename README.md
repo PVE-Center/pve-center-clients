@@ -167,6 +167,16 @@ pve-center-clients/
 
 ---
 
+## 🗺️ Roadmap
+
+- [x] Shared React 19 + TypeScript UI with dynamic server URL configuration, Bearer token auth & Demo Mode
+- [x] Tauri v2 desktop wrapper for Windows (`.msi` / `.exe`) and Linux (`.AppImage` / `.deb`) with System Tray
+- [x] Capacitor 8 Android wrapper with cleartext LAN + Tailscale HTTPS support & Gradle CI build
+- [ ] OS keychain / Credential Manager encrypted token storage via Tauri Stronghold / Android Keystore
+- [ ] Signed release artifacts & Sparkle / Tauri Updater auto-updates on tagged GitHub Releases
+
+---
+
 ## Contributing & Security
 
 - Please read [CONTRIBUTING.md](CONTRIBUTING.md) and our [Code of Conduct](CODE_OF_CONDUCT.md) before opening a pull request.
