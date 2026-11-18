@@ -160,10 +160,10 @@ pve-center-clients/
 
 | Repository | Description |
 | --- | --- |
-| [**Fairy-Jeux/pve-panel**](https://github.com/Fairy-Jeux/pve-panel) | Core FastAPI server, Proxmox/SMART monitoring, Alert Engine, Docker & `install.sh` |
-| [**Fairy-Jeux/pve-center-apple**](https://github.com/Fairy-Jeux/pve-center-apple) | Native Swift 6 / SwiftUI apps for iOS, iPadOS, macOS, and Apple TV (`tvOS`) |
-| [**Fairy-Jeux/pve-center-clients**](https://github.com/Fairy-Jeux/pve-center-clients) | Cross-platform Windows, Linux (Tauri v2), and Android (Capacitor 8) clients *(this repo)* |
-| [**Fairy-Jeux/pve-center-website**](https://github.com/Fairy-Jeux/pve-center-website) | Official documentation portal & landing site |
+| [**PVE-Center/pve-panel**](https://github.com/PVE-Center/pve-panel) | Core FastAPI server, Proxmox/SMART monitoring, Alert Engine, Docker & `install.sh` |
+| [**PVE-Center/pve-center-apple**](https://github.com/PVE-Center/pve-center-apple) | Native Swift 6 / SwiftUI apps for iOS, iPadOS, macOS, and Apple TV (`tvOS`) |
+| [**PVE-Center/pve-center-clients**](https://github.com/PVE-Center/pve-center-clients) | Cross-platform Windows, Linux (Tauri v2), and Android (Capacitor 8) clients *(this repo)* |
+| [**PVE-Center/pve-center-website**](https://github.com/PVE-Center/pve-center-website) | Official documentation portal & landing site |
 
 ---
 

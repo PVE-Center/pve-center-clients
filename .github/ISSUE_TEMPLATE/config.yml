@@ -1,11 +1,11 @@
 blank_issues_enabled: false
 contact_links:
   - name: PVE Command Center Server Issues
-    url: https://github.com/Fairy-Jeux/pve-panel/issues
+    url: https://github.com/PVE-Center/pve-panel/issues
     about: Backend FastAPI, Proxmox API, Docker, and install.sh issues belong in pve-panel.
   - name: Apple Native Clients (iOS / macOS / tvOS)
-    url: https://github.com/Fairy-Jeux/pve-center-apple/issues
+    url: https://github.com/PVE-Center/pve-center-apple/issues
     about: SwiftUI iPhone, iPad, Mac, and Apple TV issues belong in pve-center-apple.
   - name: Documentation & Website
-    url: https://github.com/Fairy-Jeux/pve-center-website/issues
+    url: https://github.com/PVE-Center/pve-center-website/issues
     about: Documentation portal issues belong in pve-center-website.

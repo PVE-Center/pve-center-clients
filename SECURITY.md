@@ -17,7 +17,7 @@
 Please **do not** open a public GitHub issue for security vulnerabilities.
 
 Instead:
-1. Use GitHub **Private Vulnerability Reporting** on `Fairy-Jeux/pve-center-clients` (Security tab -> Report a vulnerability), or
+1. Use GitHub **Private Vulnerability Reporting** on `PVE-Center/pve-center-clients` (Security tab -> Report a vulnerability), or
 2. Contact the maintainers privately via the repository profile.
 
 Include affected platform (Windows, Linux, Android), client version, reproduction steps, and potential impact. We aim to acknowledge reports within 72 hours.

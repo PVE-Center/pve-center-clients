@@ -31,6 +31,6 @@ Thank you for helping improve the Windows, Linux, and Android clients for **PVE 
 
 ## Cross-Repository Scope
 
-- Server API, Docker, `install.sh`, and FastAPI routes belong in [`pve-panel`](https://github.com/Fairy-Jeux/pve-panel).
-- Native SwiftUI apps (iOS/macOS/tvOS) belong in [`pve-center-apple`](https://github.com/Fairy-Jeux/pve-center-apple).
-- Documentation portal updates belong in [`pve-center-website`](https://github.com/Fairy-Jeux/pve-center-website).
+- Server API, Docker, `install.sh`, and FastAPI routes belong in [`pve-panel`](https://github.com/PVE-Center/pve-panel).
+- Native SwiftUI apps (iOS/macOS/tvOS) belong in [`pve-center-apple`](https://github.com/PVE-Center/pve-center-apple).
+- Documentation portal updates belong in [`pve-center-website`](https://github.com/PVE-Center/pve-center-website).

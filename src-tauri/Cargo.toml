@@ -5,7 +5,7 @@ description = "PVE Command Center desktop client for Windows and Linux"
 authors = ["PVE Command Center Contributors"]
 edition = "2021"
 license = "MIT"
-repository = "https://github.com/Fairy-Jeux/pve-center-clients"
+repository = "https://github.com/PVE-Center/pve-center-clients"
 
 [lib]
 name = "pve_center_desktop_lib"
