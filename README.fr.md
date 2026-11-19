@@ -56,7 +56,9 @@ flowchart LR
 
 ## Fonctionnalités
 
-- **Connexion à n’importe quel serveur PVE Command Center** : enregistrez l’URL Tailscale Serve (`https://...ts.net`) ou LAN (`http://192.168.x.x:8000`) dans `localStorage` via la fenêtre **Connexion Serveur**, tout en conservant le repli relatif `/api` lorsque l’interface est servie sur le Web.
+- **Connexion à n’importe quel serveur PVE Command Center** : enregistrez l’URL Tailscale Serve (`https://...ts.net`) ou LAN (`http://192.168.x.x:8000`) via la fenêtre **Connexion Serveur**, tout en conservant le repli relatif `/api` lorsque l’interface est servie sur le Web.
+- **Stockage chiffré des identifiants et jetons** : `src/lib/secureStorage.ts` chiffre au repos l’URL du serveur, les jetons API Bearer et les JWT de session via **WebCrypto AES-256-GCM** (`window.crypto.subtle`), avec migration transparente des entrées `localStorage` en clair et repli non bloquant sur HTTP LAN lorsque `crypto.subtle` est indisponible.
+- **Sélecteur de nœuds Cluster Proxmox VE** : basculez entre la vue agrégée **Tous les nœuds (`*`)** et chaque nœud individuel (`?node=<nom>`), visualisez les alertes de **bascule automatique (failover)**, identifiez l’hôte de chaque VM/LXC et ciblez les commandes d’alimentation sur le nœud concerné.
 - **Authentification DualAuth** : prise en charge du SSO Tailscale, du code **PIN Administrateur** (`AuthLoginModal`) et des jetons Bearer (`pve_...`).
 - **Réseau natif sans blocage CORS** :
   - Sur Desktop, `@tauri-apps/plugin-http` (`tauri-plugin-http`) exécute les appels HTTP côté Rust.
@@ -138,8 +140,9 @@ Les APK générés se trouvent dans `android/app/build/outputs/apk/`.
 ```text
 pve-center-clients/
 ├── src/                        # Interface partagée React 19 + TypeScript + Tailwind
-│   ├── components/             # Vues & modales (dont ServerConfigModal)
+│   ├── components/             # Vues & modales (dont ProxmoxSection & ServerConfigModal)
 │   ├── lib/apiClient.ts        # Détection plateforme, URL distante, fetch Tauri/Capacitor/Web & Mode Démo
+│   ├── lib/secureStorage.ts    # Stockage chiffré WebCrypto AES-256-GCM des jetons & migration transparente
 │   └── lib/realtimeClient.ts   # Client temps réel WebSocket + SSE
 ├── public/                     # Icônes PWA et manifeste
 ├── src-tauri/                  # Enveloppe Desktop Tauri v2 (Windows & Linux)
@@ -170,10 +173,12 @@ pve-center-clients/
 ## 🗺️ Feuille de route
 
 - [x] UI partagée React 19 + TypeScript avec URL serveur dynamique, authentification Bearer et Mode Démo
+- [x] Sélecteur de nœuds Cluster Proxmox VE (`?node=*` / par nœud, bannière failover et badges d’hôte sur les VMs/LXC)
 - [x] Packaging Desktop Tauri v2 pour Windows (`.msi` / `.exe`) et Linux (`.AppImage` / `.deb`) avec icône barre système
 - [x] Wrapper Android Capacitor 8 compatible LAN HTTP et HTTPS Tailscale + compilation CI Gradle
-- [ ] Stockage chiffré des jetons dans le trousseau OS (Credential Manager / libsecret / Android Keystore)
-- [ ] Publication signée & mise à jour automatique (`tauri-plugin-updater`) sur les tags GitHub Release
+- [x] Stockage chiffré au repos des identifiants et jetons via WebCrypto AES-256-GCM (`src/lib/secureStorage.ts`) avec migration transparente et repli HTTP LAN
+- [x] Publication automatisée des GitHub Releases sur les tags `v*` (`build-clients.yml` regroupant les artefacts Web, Windows, Linux et Android)
+- [ ] Intégration trousseau OS natif (Tauri Stronghold / Android Keystore) et mises à jour signées (`tauri-plugin-updater`)
 
 ---
 

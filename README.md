@@ -56,7 +56,9 @@ flowchart LR
 
 ## Features
 
-- **Connect to any PVE Command Center server**: Save your Tailscale Serve (`https://...ts.net`) or local LAN (`http://192.168.x.x:8000`) server URL in `localStorage` via the **Server Configuration** modal, with automatic fallback to relative `/api` when served as a web app.
+- **Connect to any PVE Command Center server**: Save your Tailscale Serve (`https://...ts.net`) or local LAN (`http://192.168.x.x:8000`) server URL via the **Server Configuration** modal, with automatic fallback to relative `/api` when served as a web app.
+- **Encrypted credential & token storage**: `src/lib/secureStorage.ts` encrypts persisted server URLs, Bearer API tokens, and session JWTs at rest using **WebCrypto AES-256-GCM** (`window.crypto.subtle`), automatically migrating legacy plaintext `localStorage` entries and degrading cleanly on plain LAN HTTP contexts where `crypto.subtle` is unavailable.
+- **Multi-node Proxmox VE cluster switcher**: Switch between aggregated **Cluster (`*`)** telemetry and individual nodes (`?node=<name>`), view automatic **failover** alerts, inspect per-guest host badges, and send VM/LXC power commands to the guest's hosting node.
 - **DualAuth support**: Works seamlessly with Tailscale SSO, Admin PIN login (`AuthLoginModal`), and Bearer API tokens (`pve_...`).
 - **CORS-free native networking**:
   - Desktop uses `@tauri-apps/plugin-http` (`tauri-plugin-http`) so requests route through Rust rather than WebView CORS checks.
@@ -138,8 +140,9 @@ Generated APKs are placed under `android/app/build/outputs/apk/`.
 ```text
 pve-center-clients/
 ├── src/                        # Shared React 19 + TypeScript + Tailwind UI
-│   ├── components/             # Dashboard views & modals (including ServerConfigModal)
+│   ├── components/             # Dashboard views & modals (including ProxmoxSection & ServerConfigModal)
 │   ├── lib/apiClient.ts        # Platform detection, remote base URL, Tauri/Capacitor/Web fetch & Demo Mode
+│   ├── lib/secureStorage.ts    # WebCrypto AES-256-GCM credential/token storage & plaintext migration
 │   └── lib/realtimeClient.ts   # WebSocket + SSE live event client
 ├── public/                     # PWA icons & manifest
 ├── src-tauri/                  # Tauri v2 desktop wrapper (Windows & Linux)
@@ -170,10 +173,12 @@ pve-center-clients/
 ## 🗺️ Roadmap
 
 - [x] Shared React 19 + TypeScript UI with dynamic server URL configuration, Bearer token auth & Demo Mode
+- [x] Multi-node Proxmox VE cluster switcher UI (`?node=*` / per-node telemetry, failover alert banner & guest host badges)
 - [x] Tauri v2 desktop wrapper for Windows (`.msi` / `.exe`) and Linux (`.AppImage` / `.deb`) with System Tray
 - [x] Capacitor 8 Android wrapper with cleartext LAN + Tailscale HTTPS support & Gradle CI build
-- [ ] OS keychain / Credential Manager encrypted token storage via Tauri Stronghold / Android Keystore
-- [ ] Signed release artifacts & Sparkle / Tauri Updater auto-updates on tagged GitHub Releases
+- [x] Encrypted at-rest credential & token storage via WebCrypto AES-256-GCM (`src/lib/secureStorage.ts`) with plaintext migration & plain HTTP fallback
+- [x] Automated GitHub Release publishing on `v*` tags (`build-clients.yml` attaching Web, Windows, Linux & Android artifacts)
+- [ ] OS keychain / Credential Manager integration (Tauri Stronghold / Android Keystore) & signed `tauri-plugin-updater` auto-updates
 
 ---
 

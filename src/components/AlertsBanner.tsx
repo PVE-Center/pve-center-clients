@@ -65,7 +65,18 @@ export function AlertsBanner({
     });
   }
 
-  const lvm = pveOverview?.node.storages.find((s) => s.name === 'local-lvm');
+  if (pveOverview?.failover_active) {
+    alerts.push({
+      id: 'pve-failover',
+      severity: 'warn',
+      text: `Bascule Proxmox active vers ${pveOverview.selected_node || pveOverview.node.name}`,
+      tab: 'proxmox',
+    });
+  }
+
+  const lvm = pveOverview?.node.storages.find(
+    (s) => s.name === 'local-lvm' || s.name.endsWith(':local-lvm')
+  );
   if (lvm && lvm.used_pct >= 80) {
     alerts.push({
       id: 'lvm-warn',

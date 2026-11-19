@@ -104,6 +104,9 @@ export function App() {
 
   const hasLoadedOnceRef = useRef(false);
   const autoPromptedOnboardingRef = useRef(false);
+  const [selectedPveNode, setSelectedPveNode] = useState<string>('');
+  const selectedPveNodeRef = useRef<string>('');
+  const pveReqSeqRef = useRef(0);
 
   const [pendingAction, setPendingAction] = useState<{
     resource: PveResource;
@@ -217,9 +220,15 @@ export function App() {
       const currentUser = (await meResp.json()) as AuthUser;
       setUser(currentUser);
 
+      const activeNode = selectedPveNodeRef.current.trim();
+      const pveOverviewUrl = activeNode
+        ? `/api/pve/overview?node=${encodeURIComponent(activeNode)}`
+        : '/api/pve/overview';
+      const pveReqSeq = ++pveReqSeqRef.current;
+
       const [pveResp, svcResp, csResp, widResp, usrResp, opsResp, incResp, setupResp] =
         await Promise.all([
-          fetch('/api/pve/overview'),
+          fetch(pveOverviewUrl),
           fetch('/api/services'),
           fetch('/api/custom-services'),
           fetch('/api/widgets/all'),
@@ -229,7 +238,9 @@ export function App() {
           fetch('/api/setup/status'),
         ]);
 
-      if (pveResp.ok) setPveOverview(await pveResp.json());
+      if (pveResp.ok && pveReqSeq === pveReqSeqRef.current) {
+        setPveOverview(await pveResp.json());
+      }
       if (svcResp.ok) {
         const svcData = await svcResp.json();
         setCategories(svcData.categories || []);
@@ -395,13 +406,48 @@ export function App() {
     return () => window.clearTimeout(timer);
   }, [toast]);
 
+  const handleSelectPveNode = useCallback(async (nextNode: string) => {
+    const trimmed = nextNode.trim();
+    setSelectedPveNode(trimmed);
+    selectedPveNodeRef.current = trimmed;
+    if (isNativePlatform() && !getServerUrl() && !isDemoMode()) return;
+
+    const overviewUrl = trimmed
+      ? `/api/pve/overview?node=${encodeURIComponent(trimmed)}`
+      : '/api/pve/overview';
+    const pveReqSeq = ++pveReqSeqRef.current;
+    try {
+      const resp = await fetch(overviewUrl);
+      if (pveReqSeq !== pveReqSeqRef.current) return;
+      if (resp.ok) {
+        setPveOverview(await resp.json());
+      } else {
+        setToast({
+          type: 'error',
+          message: `Impossible de charger le nœud Proxmox (${resp.status}).`,
+        });
+      }
+    } catch {
+      if (pveReqSeq === pveReqSeqRef.current) {
+        setToast({
+          type: 'error',
+          message: 'Erreur réseau lors du changement de nœud Proxmox.',
+        });
+      }
+    }
+  }, []);
+
   const handleConfirmAction = async () => {
     if (!pendingAction) return;
     setActionBusy(true);
     const { resource, action } = pendingAction;
+    const activeNode = selectedPveNodeRef.current.trim();
+    const targetNode =
+      resource.node || (activeNode && activeNode !== '*' && activeNode !== 'all' ? activeNode : '');
+    const nodeQs = targetNode ? `?node=${encodeURIComponent(targetNode)}` : '';
     try {
       const resp = await fetch(
-        `/api/pve/${resource.type}/${resource.vmid}/${action}`,
+        `/api/pve/${resource.type}/${resource.vmid}/${action}${nodeQs}`,
         { method: 'POST' }
       );
       const data = await resp.json().catch(() => ({}));
@@ -568,6 +614,8 @@ export function App() {
           onApplied={() => {
             setServerModalOpen(false);
             setAuthError(null);
+            setSelectedPveNode('');
+            selectedPveNodeRef.current = '';
             hasLoadedOnceRef.current = false;
             autoPromptedOnboardingRef.current = false;
             void fetchAllData();
@@ -785,6 +833,8 @@ export function App() {
         {showSection('proxmox') && (
           <ProxmoxSection
             overview={pveOverview}
+            selectedNode={selectedPveNode}
+            onSelectNode={(nextNode) => void handleSelectPveNode(nextNode)}
             search={search}
             onRequestAction={(resource, action) =>
               setPendingAction({ resource, action })
@@ -970,6 +1020,8 @@ export function App() {
           setServerModalOpen(false);
           setAuthModalOpen(false);
           setAuthError(null);
+          setSelectedPveNode('');
+          selectedPveNodeRef.current = '';
           hasLoadedOnceRef.current = false;
           autoPromptedOnboardingRef.current = false;
           void fetchAllData();

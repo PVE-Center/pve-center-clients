@@ -1,9 +1,11 @@
 import { useState } from 'react';
 import {
+  AlertTriangle,
   Box,
   Clock,
   Cpu,
   HardDrive,
+  Layers,
   MemoryStick,
   Monitor,
   Play,
@@ -14,6 +16,8 @@ import type { PveAction, PveOverview, PveResource } from '../types';
 
 interface ProxmoxSectionProps {
   overview: PveOverview | null;
+  selectedNode: string;
+  onSelectNode: (node: string) => void;
   search: string;
   onRequestAction: (resource: PveResource, action: PveAction) => void;
 }
@@ -35,6 +39,8 @@ function progressTone(pct: number): string {
 
 export function ProxmoxSection({
   overview,
+  selectedNode,
+  onSelectNode,
   search,
   onRequestAction,
 }: ProxmoxSectionProps) {
@@ -51,6 +57,9 @@ export function ProxmoxSection({
   }
 
   const { node, counts, resources } = overview;
+  const clusterNodes = overview.cluster_nodes || [];
+  const activeNode = selectedNode || overview.selected_node || node.name;
+  const isClusterMode = activeNode === '*' || activeNode === 'all';
   const query = search.trim().toLowerCase();
 
   const filteredResources = resources.filter((item) => {
@@ -59,12 +68,14 @@ export function ProxmoxSection({
     return (
       item.name.toLowerCase().includes(query) ||
       String(item.vmid).includes(query) ||
+      (item.node ? item.node.toLowerCase().includes(query) : false) ||
       item.tags.some((t) => t.toLowerCase().includes(query))
     );
   });
 
   const lvmStorage =
-    node.storages.find((s) => s.name === 'local-lvm') || node.storages[0];
+    node.storages.find((s) => s.name === 'local-lvm' || s.name.endsWith(':local-lvm')) ||
+    node.storages[0];
 
   return (
     <section className="space-y-4">
@@ -78,7 +89,9 @@ export function ProxmoxSection({
             }`}
           />
           <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-800 dark:text-slate-300">
-            Supervision Proxmox VE — Nœud {node.name}
+            {isClusterMode
+              ? `Supervision Proxmox VE — ${node.name}`
+              : `Supervision Proxmox VE — Nœud ${node.name}`}
           </h2>
           {node.pve_version && (
             <span className="rounded-md border border-slate-200 bg-white/75 px-2 py-0.5 text-[11px] text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
@@ -123,6 +136,68 @@ export function ProxmoxSection({
           </button>
         </div>
       </div>
+
+      {/* Sélecteur de nœud Cluster Proxmox VE */}
+      {clusterNodes.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => onSelectNode('*')}
+            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition active:scale-95 ${
+              isClusterMode
+                ? 'cider-accent-ring text-slate-900 shadow-inner dark:text-white'
+                : 'liquid-pill text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'
+            }`}
+          >
+            <Layers className="h-3.5 w-3.5 text-cyan-500 dark:text-cyan-400" />
+            <span>Tous les nœuds (*)</span>
+          </button>
+
+          {clusterNodes.map((cn) => {
+            const isSelected = !isClusterMode && activeNode === cn.name;
+            return (
+              <button
+                key={cn.name}
+                type="button"
+                onClick={() => onSelectNode(cn.name)}
+                className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition active:scale-95 ${
+                  isSelected
+                    ? 'cider-accent-ring text-slate-900 shadow-inner dark:text-white'
+                    : 'liquid-pill text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'
+                }`}
+              >
+                <span
+                  className={`h-2 w-2 rounded-full ${
+                    cn.online
+                      ? 'bg-emerald-500 shadow-[0_0_6px_rgba(52,211,153,0.75)]'
+                      : 'bg-rose-500'
+                  }`}
+                />
+                <span className="font-mono">{cn.name}</span>
+                <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                  {cn.online ? `${cn.cpu_pct}% CPU` : 'Hors ligne'}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Bannière Failover Cluster */}
+      {overview.failover_active && (
+        <div className="flex items-start gap-2.5 rounded-2xl border border-amber-500/35 bg-amber-500/10 px-4 py-3 text-xs text-amber-900 dark:text-amber-200">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500 dark:text-amber-400" />
+          <div>
+            <span className="font-semibold">Bascule cluster (Failover) active :</span>{' '}
+            le nœud principal étant injoignable, la télémétrie est affichée depuis le nœud de
+            secours{' '}
+            <span className="font-mono font-semibold">
+              {overview.selected_node || node.name}
+            </span>
+            .
+          </div>
+        </div>
+      )}
 
       {/* KPIs Nœud Proxmox */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -244,7 +319,7 @@ export function ProxmoxSection({
                 const isRunning = item.status === 'running';
                 return (
                   <tr
-                    key={`${item.type}-${item.vmid}`}
+                    key={`${item.node || 'node'}-${item.type}-${item.vmid}`}
                     className="transition hover:bg-black/[0.02] dark:hover:bg-slate-800/40"
                   >
                     <td className="px-4 py-2.5">
@@ -264,13 +339,18 @@ export function ProxmoxSection({
                           )}
                         </span>
                         <div>
-                          <div className="flex items-center gap-2">
+                          <div className="flex flex-wrap items-center gap-1.5">
                             <span className="font-mono text-xs text-slate-500">
                               #{item.vmid}
                             </span>
                             <span className="font-medium text-slate-900 dark:text-slate-100">
                               {item.name}
                             </span>
+                            {item.node && (
+                              <span className="rounded border border-indigo-500/25 bg-indigo-500/10 px-1.5 py-0.5 font-mono text-[10px] font-medium text-indigo-700 dark:text-indigo-300">
+                                {item.node}
+                              </span>
+                            )}
                             {item.is_self && (
                               <span className="rounded bg-cyan-500/15 px-1.5 py-0.5 text-[10px] font-medium text-cyan-700 dark:text-cyan-300">
                                 Panel

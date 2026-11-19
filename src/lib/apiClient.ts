@@ -1,9 +1,17 @@
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
+import {
+  getSecureItem,
+  getSecureStorageStatus,
+  initSecureStorage,
+  removeSecureItem,
+  setSecureItem,
+} from './secureStorage';
 import type {
   APNsConfigSummary,
   ApiTokenInfo,
   AuthLoginResponse,
   AuthUser,
+  ClusterNode,
   ConfigParsedSummary,
   ConfigSaveResponse,
   ConfigValidateResponse,
@@ -44,6 +52,13 @@ import type {
 const STORAGE_SERVER_URL = 'pve_panel_server_url';
 const STORAGE_DEMO_MODE = 'pve_panel_demo_mode';
 const STORAGE_AUTH_TOKEN = 'pve_panel_auth_token';
+const SECURE_STORAGE_KEYS = [STORAGE_SERVER_URL, STORAGE_AUTH_TOKEN];
+
+export { getSecureStorageStatus };
+
+export async function ensureSecureStorageReady(): Promise<void> {
+  await initSecureStorage(SECURE_STORAGE_KEYS);
+}
 
 let interceptorInstalled = false;
 let nativeFetchRef: typeof window.fetch | null = null;
@@ -91,7 +106,7 @@ export function normalizeServerUrl(raw: string): string {
 
 export function getServerUrl(): string {
   if (typeof window === 'undefined') return '';
-  const stored = normalizeServerUrl(window.localStorage.getItem(STORAGE_SERVER_URL) || '');
+  const stored = normalizeServerUrl(getSecureItem(STORAGE_SERVER_URL));
   if (stored) return stored;
   const runtimeUrl = (window as TauriWindow).__PVE_SERVER_URL__ || '';
   return normalizeServerUrl(runtimeUrl);
@@ -101,30 +116,30 @@ export function setServerUrl(url: string): void {
   if (typeof window === 'undefined') return;
   const normalized = normalizeServerUrl(url);
   if (normalized) {
-    window.localStorage.setItem(STORAGE_SERVER_URL, normalized);
+    setSecureItem(STORAGE_SERVER_URL, normalized);
   } else {
-    window.localStorage.removeItem(STORAGE_SERVER_URL);
+    removeSecureItem(STORAGE_SERVER_URL);
   }
 }
 
 export function getAuthToken(): string {
   if (typeof window === 'undefined') return '';
-  return (window.localStorage.getItem(STORAGE_AUTH_TOKEN) || '').trim();
+  return getSecureItem(STORAGE_AUTH_TOKEN).trim();
 }
 
 export function setAuthToken(token: string): void {
   if (typeof window === 'undefined') return;
   const trimmed = token.trim();
   if (trimmed) {
-    window.localStorage.setItem(STORAGE_AUTH_TOKEN, trimmed);
+    setSecureItem(STORAGE_AUTH_TOKEN, trimmed);
   } else {
-    window.localStorage.removeItem(STORAGE_AUTH_TOKEN);
+    removeSecureItem(STORAGE_AUTH_TOKEN);
   }
 }
 
 export function clearAuthToken(): void {
   if (typeof window === 'undefined') return;
-  window.localStorage.removeItem(STORAGE_AUTH_TOKEN);
+  removeSecureItem(STORAGE_AUTH_TOKEN);
 }
 
 export function isDemoMode(): boolean {
@@ -204,6 +219,7 @@ function createInitialDemoState(): DemoState {
     resources: [
       {
         vmid: 101,
+        node: 'pve-node-01',
         name: 'ct-reverse-proxy',
         type: 'lxc',
         status: 'running',
@@ -221,6 +237,7 @@ function createInitialDemoState(): DemoState {
       },
       {
         vmid: 102,
+        node: 'pve-node-01',
         name: 'ct-media-server',
         type: 'lxc',
         status: 'running',
@@ -238,6 +255,7 @@ function createInitialDemoState(): DemoState {
       },
       {
         vmid: 103,
+        node: 'pve-node-01',
         name: 'vm-docker-host',
         type: 'qemu',
         status: 'running',
@@ -255,6 +273,7 @@ function createInitialDemoState(): DemoState {
       },
       {
         vmid: 104,
+        node: 'pve-node-02',
         name: 'ct-backup-node',
         type: 'lxc',
         status: 'stopped',
@@ -271,7 +290,44 @@ function createInitialDemoState(): DemoState {
         is_self: false,
       },
       {
+        vmid: 105,
+        node: 'pve-node-02',
+        name: 'vm-compute-02',
+        type: 'qemu',
+        status: 'running',
+        cpu_pct: 14.5,
+        cpus: 6,
+        mem_used_bytes: Math.round(7.6 * GB),
+        mem_total_bytes: 16 * GB,
+        mem_pct: 47.5,
+        disk_used_bytes: 38 * GB,
+        disk_total_bytes: 100 * GB,
+        uptime_seconds: 1123400,
+        uptime_human: '13j 0h',
+        tags: ['compute', 'worker'],
+        is_self: false,
+      },
+      {
+        vmid: 106,
+        node: 'pve-node-02',
+        name: 'ct-immich',
+        type: 'lxc',
+        status: 'running',
+        cpu_pct: 6.8,
+        cpus: 4,
+        mem_used_bytes: Math.round(3.1 * GB),
+        mem_total_bytes: 8 * GB,
+        mem_pct: 38.8,
+        disk_used_bytes: 22 * GB,
+        disk_total_bytes: 64 * GB,
+        uptime_seconds: 864200,
+        uptime_human: '10j 0h',
+        tags: ['photos', 'ml'],
+        is_self: false,
+      },
+      {
         vmid: 116,
+        node: 'pve-node-01',
         name: 'pve-panel',
         type: 'lxc',
         status: 'running',
@@ -887,6 +943,250 @@ function jsonResponse(data: unknown, status = 200): Response {
   });
 }
 
+const DEMO_CLUSTER_NODES: ClusterNode[] = [
+  {
+    name: 'pve-node-01',
+    status: 'online',
+    online: true,
+    cpu_pct: 23.8,
+    cpus: 16,
+    mem_used_bytes: Math.round(28.4 * GB),
+    mem_total_bytes: 64 * GB,
+    mem_pct: 44.4,
+    uptime_seconds: 1842310,
+    uptime_human: '21j 7h 45m',
+  },
+  {
+    name: 'pve-node-02',
+    status: 'online',
+    online: true,
+    cpu_pct: 14.2,
+    cpus: 12,
+    mem_used_bytes: Math.round(16.8 * GB),
+    mem_total_bytes: 32 * GB,
+    mem_pct: 52.5,
+    uptime_seconds: 1123400,
+    uptime_human: '13j 0h 3m',
+  },
+];
+
+function buildDemoNodeSummary(nodeName: 'pve-node-01' | 'pve-node-02'): PveOverview['node'] {
+  if (nodeName === 'pve-node-02') {
+    return {
+      name: 'pve-node-02',
+      cpu_pct: 14.2,
+      cpu_model: 'Intel Xeon E-2388G Compute Host',
+      cpu_threads: 12,
+      loadavg: ['0.72', '0.64', '0.58'],
+      mem_used_bytes: Math.round(16.8 * GB),
+      mem_total_bytes: 32 * GB,
+      mem_pct: 52.5,
+      swap_used_bytes: Math.round(0.2 * GB),
+      swap_total_bytes: 4 * GB,
+      rootfs_used_bytes: Math.round(29.4 * GB),
+      rootfs_total_bytes: 120 * GB,
+      uptime_seconds: 1123400,
+      uptime_human: '13j 0h 3m',
+      pve_version: '8.3.2',
+      storages: [
+        {
+          name: 'local-lvm',
+          type: 'lvmthin',
+          active: true,
+          used_bytes: 240 * GB,
+          total_bytes: 800 * GB,
+          used_pct: 30.0,
+        },
+        {
+          name: 'local',
+          type: 'dir',
+          active: true,
+          used_bytes: 46 * GB,
+          total_bytes: 120 * GB,
+          used_pct: 38.3,
+        },
+      ],
+    };
+  }
+
+  return {
+    name: 'pve-node-01',
+    cpu_pct: 23.8,
+    cpu_model: 'AMD EPYC / Ryzen Pro Virtualization Host',
+    cpu_threads: 16,
+    loadavg: ['1.18', '1.05', '0.94'],
+    mem_used_bytes: Math.round(28.4 * GB),
+    mem_total_bytes: 64 * GB,
+    mem_pct: 44.4,
+    swap_used_bytes: Math.round(0.4 * GB),
+    swap_total_bytes: 8 * GB,
+    rootfs_used_bytes: Math.round(42.6 * GB),
+    rootfs_total_bytes: 120 * GB,
+    uptime_seconds: 1842310,
+    uptime_human: '21j 7h 45m',
+    pve_version: '8.3.2',
+    storages: [
+      {
+        name: 'local-lvm',
+        type: 'lvmthin',
+        active: true,
+        used_bytes: 412 * GB,
+        total_bytes: 1000 * GB,
+        used_pct: 41.2,
+      },
+      {
+        name: 'local',
+        type: 'dir',
+        active: true,
+        used_bytes: 88 * GB,
+        total_bytes: 240 * GB,
+        used_pct: 36.7,
+      },
+    ],
+  };
+}
+
+function buildDemoExternalStorage(): PveOverview['external_storage'] {
+  return {
+    pool: {
+      name: 'Pool MergerFS (32 To)',
+      mount: '/mnt/storage',
+      fstype: 'fuse.mergerfs',
+      policy: 'mfs (most free space)',
+      drives_count: 3,
+      available: true,
+      total_bytes: 32 * TB,
+      used_bytes: Math.round(19.6 * TB),
+      avail_bytes: Math.round(12.4 * TB),
+      used_pct: 61.3,
+    },
+    drives: [
+      {
+        mount: '/mnt/disk1',
+        label: 'Disque 1 • 16 To',
+        wwn: 'wwn-0x5000demo00000001',
+        devpath: '/dev/sda',
+        model: 'Seagate IronWolf Pro 16TB',
+        vendor: 'ATA',
+        serial: 'DEMO-16TB-01',
+        type: 'HDD',
+        rpm: '7200 rpm',
+        health: 'PASSED',
+        size_bytes: 16 * TB,
+        total_bytes: 16 * TB,
+        used_bytes: Math.round(10.1 * TB),
+        avail_bytes: Math.round(5.9 * TB),
+        used_pct: 63.1,
+      },
+      {
+        mount: '/mnt/disk2',
+        label: 'Disque 2 • 16 To',
+        wwn: 'wwn-0x5000demo00000002',
+        devpath: '/dev/sdb',
+        model: 'Seagate IronWolf Pro 16TB',
+        vendor: 'ATA',
+        serial: 'DEMO-16TB-02',
+        type: 'HDD',
+        rpm: '7200 rpm',
+        health: 'PASSED',
+        size_bytes: 16 * TB,
+        total_bytes: 16 * TB,
+        used_bytes: Math.round(9.5 * TB),
+        avail_bytes: Math.round(6.5 * TB),
+        used_pct: 59.4,
+      },
+      {
+        mount: '/mnt/disk3',
+        label: 'Cache NVMe • 2 To',
+        wwn: 'wwn-0x5000demo00000003',
+        devpath: '/dev/nvme0n1',
+        model: 'Samsung 990 PRO 2TB',
+        vendor: 'NVMe',
+        serial: 'DEMO-NVME-01',
+        type: 'SSD',
+        rpm: 'NVMe',
+        health: 'PASSED',
+        size_bytes: 2 * TB,
+        total_bytes: 2 * TB,
+        used_bytes: Math.round(0.84 * TB),
+        avail_bytes: Math.round(1.16 * TB),
+        used_pct: 42.0,
+      },
+    ],
+    system_ssd: {
+      devpath: '/dev/nvme1n1',
+      model: 'Enterprise Boot NVMe 512GB',
+      serial: 'DEMO-SYS-01',
+      health: 'PASSED',
+      size_bytes: 512 * GB,
+    },
+  };
+}
+
+function buildDemoOverview(requestedNode: string): PveOverview {
+  const reqNode = requestedNode.trim();
+  const isCluster = reqNode === '*' || reqNode === 'all';
+  const targetNode: 'pve-node-01' | 'pve-node-02' =
+    reqNode === 'pve-node-02' ? 'pve-node-02' : 'pve-node-01';
+
+  const scopedResources = isCluster
+    ? demoState.resources
+    : demoState.resources.filter((r) => (r.node || 'pve-node-01') === targetNode);
+
+  const running = scopedResources.filter((r) => r.status === 'running').length;
+  const stopped = scopedResources.length - running;
+  const lxcCount = scopedResources.filter((r) => r.type === 'lxc').length;
+  const qemuCount = scopedResources.filter((r) => r.type === 'qemu').length;
+
+  let nodeSummary: PveOverview['node'];
+  if (isCluster) {
+    const n1 = buildDemoNodeSummary('pve-node-01');
+    const n2 = buildDemoNodeSummary('pve-node-02');
+    const memUsed = n1.mem_used_bytes + n2.mem_used_bytes;
+    const memTotal = n1.mem_total_bytes + n2.mem_total_bytes;
+    nodeSummary = {
+      name: 'Cluster (2 nœuds)',
+      cpu_pct: Math.round(((n1.cpu_pct + n2.cpu_pct) / 2) * 10) / 10,
+      cpu_model: n1.cpu_model,
+      cpu_threads: n1.cpu_threads + n2.cpu_threads,
+      loadavg: n1.loadavg,
+      mem_used_bytes: memUsed,
+      mem_total_bytes: memTotal,
+      mem_pct: Math.round((memUsed / memTotal) * 1000) / 10,
+      swap_used_bytes: n1.swap_used_bytes + n2.swap_used_bytes,
+      swap_total_bytes: n1.swap_total_bytes + n2.swap_total_bytes,
+      rootfs_used_bytes: n1.rootfs_used_bytes + n2.rootfs_used_bytes,
+      rootfs_total_bytes: n1.rootfs_total_bytes + n2.rootfs_total_bytes,
+      uptime_seconds: Math.max(n1.uptime_seconds, n2.uptime_seconds),
+      uptime_human: n1.uptime_human,
+      pve_version: n1.pve_version,
+      storages: [
+        ...n1.storages.map((s) => ({ ...s, node: 'pve-node-01', name: `pve-node-01:${s.name}` })),
+        ...n2.storages.map((s) => ({ ...s, node: 'pve-node-02', name: `pve-node-02:${s.name}` })),
+      ],
+    };
+  } else {
+    nodeSummary = buildDemoNodeSummary(targetNode);
+  }
+
+  return {
+    online: true,
+    node: nodeSummary,
+    selected_node: isCluster ? reqNode : targetNode,
+    failover_active: false,
+    cluster_nodes: DEMO_CLUSTER_NODES,
+    counts: {
+      total: scopedResources.length,
+      running,
+      stopped,
+      lxc: lxcCount,
+      qemu: qemuCount,
+    },
+    resources: scopedResources,
+    external_storage: buildDemoExternalStorage(),
+  };
+}
+
 function slugifyDemoId(name: string, existingIds: Set<string>): string {
   const base =
     name
@@ -1106,140 +1406,27 @@ async function handleDemoRequest(apiPath: string, init?: RequestInit): Promise<R
     return jsonResponse(resp);
   }
 
-  if (path === '/api/pve/overview' && method === 'GET') {
-    const running = demoState.resources.filter((r) => r.status === 'running').length;
-    const stopped = demoState.resources.length - running;
-    const lxcCount = demoState.resources.filter((r) => r.type === 'lxc').length;
-    const qemuCount = demoState.resources.filter((r) => r.type === 'qemu').length;
+  if (path === '/api/pve/nodes' && method === 'GET') {
+    return jsonResponse({
+      nodes: DEMO_CLUSTER_NODES,
+      default_node: 'pve-node-01',
+    });
+  }
 
-    const overview: PveOverview = {
-      online: true,
-      node: {
-        name: 'pve-node-01',
-        cpu_pct: 23.8,
-        cpu_model: 'AMD EPYC / Ryzen Pro Virtualization Host',
-        cpu_threads: 16,
-        loadavg: ['1.18', '1.05', '0.94'],
-        mem_used_bytes: Math.round(28.4 * GB),
-        mem_total_bytes: 64 * GB,
-        mem_pct: 44.4,
-        swap_used_bytes: Math.round(0.4 * GB),
-        swap_total_bytes: 8 * GB,
-        rootfs_used_bytes: Math.round(42.6 * GB),
-        rootfs_total_bytes: 120 * GB,
-        uptime_seconds: 1842310,
-        uptime_human: '21j 7h 45m',
-        pve_version: '8.3.2',
-        storages: [
-          {
-            name: 'local-lvm',
-            type: 'lvmthin',
-            active: true,
-            used_bytes: 412 * GB,
-            total_bytes: 1000 * GB,
-            used_pct: 41.2,
-          },
-          {
-            name: 'local',
-            type: 'dir',
-            active: true,
-            used_bytes: 88 * GB,
-            total_bytes: 240 * GB,
-            used_pct: 36.7,
-          },
-        ],
-      },
-      counts: {
-        total: demoState.resources.length,
-        running,
-        stopped,
-        lxc: lxcCount,
-        qemu: qemuCount,
-      },
-      resources: demoState.resources,
-      external_storage: {
-        pool: {
-          name: 'Pool MergerFS (32 To)',
-          mount: '/mnt/storage',
-          fstype: 'fuse.mergerfs',
-          policy: 'mfs (most free space)',
-          drives_count: 3,
-          available: true,
-          total_bytes: 32 * TB,
-          used_bytes: Math.round(19.6 * TB),
-          avail_bytes: Math.round(12.4 * TB),
-          used_pct: 61.3,
-        },
-        drives: [
-          {
-            mount: '/mnt/disk1',
-            label: 'Disque 1 • 16 To',
-            wwn: 'wwn-0x5000demo00000001',
-            devpath: '/dev/sda',
-            model: 'Seagate IronWolf Pro 16TB',
-            vendor: 'ATA',
-            serial: 'DEMO-16TB-01',
-            type: 'HDD',
-            rpm: '7200 rpm',
-            health: 'PASSED',
-            size_bytes: 16 * TB,
-            total_bytes: 16 * TB,
-            used_bytes: Math.round(10.1 * TB),
-            avail_bytes: Math.round(5.9 * TB),
-            used_pct: 63.1,
-          },
-          {
-            mount: '/mnt/disk2',
-            label: 'Disque 2 • 16 To',
-            wwn: 'wwn-0x5000demo00000002',
-            devpath: '/dev/sdb',
-            model: 'Seagate IronWolf Pro 16TB',
-            vendor: 'ATA',
-            serial: 'DEMO-16TB-02',
-            type: 'HDD',
-            rpm: '7200 rpm',
-            health: 'PASSED',
-            size_bytes: 16 * TB,
-            total_bytes: 16 * TB,
-            used_bytes: Math.round(9.5 * TB),
-            avail_bytes: Math.round(6.5 * TB),
-            used_pct: 59.4,
-          },
-          {
-            mount: '/mnt/disk3',
-            label: 'Cache NVMe • 2 To',
-            wwn: 'wwn-0x5000demo00000003',
-            devpath: '/dev/nvme0n1',
-            model: 'Samsung 990 PRO 2TB',
-            vendor: 'NVMe',
-            serial: 'DEMO-NVME-01',
-            type: 'SSD',
-            rpm: 'NVMe',
-            health: 'PASSED',
-            size_bytes: 2 * TB,
-            total_bytes: 2 * TB,
-            used_bytes: Math.round(0.84 * TB),
-            avail_bytes: Math.round(1.16 * TB),
-            used_pct: 42.0,
-          },
-        ],
-        system_ssd: {
-          devpath: '/dev/nvme1n1',
-          model: 'Enterprise Boot NVMe 512GB',
-          serial: 'DEMO-SYS-01',
-          health: 'PASSED',
-          size_bytes: 512 * GB,
-        },
-      },
-    };
-    return jsonResponse(overview);
+  if (path === '/api/pve/overview' && method === 'GET') {
+    const reqNode = url.searchParams.get('node') || '';
+    return jsonResponse(buildDemoOverview(reqNode));
   }
 
   const pveMatch = path.match(/^\/api\/pve\/(lxc|qemu)\/(\d+)\/(start|stop|shutdown|reboot)$/);
   if (pveMatch && method === 'POST') {
     const [, type, vmidStr, action] = pveMatch;
     const vmid = Number(vmidStr);
-    const target = demoState.resources.find((r) => r.vmid === vmid && r.type === type);
+    const reqNode = (url.searchParams.get('node') || '').trim();
+    const target =
+      demoState.resources.find(
+        (r) => r.vmid === vmid && r.type === type && (!reqNode || r.node === reqNode)
+      ) || demoState.resources.find((r) => r.vmid === vmid && r.type === type);
     if (!target) {
       return jsonResponse({ detail: 'Ressource introuvable en mode démo' }, 404);
     }
@@ -1258,9 +1445,10 @@ async function handleDemoRequest(apiPath: string, init?: RequestInit): Promise<R
       target.uptime_seconds = 60;
       target.uptime_human = '1m';
     }
+    const targetNode = target.node || reqNode || 'pve-node-01';
     const nowSec = Math.floor(Date.now() / 1000);
     demoState.pveTasks.unshift({
-      upid: `UPID:pve-node-01:demo-${action}-${vmid}-${Date.now()}`,
+      upid: `UPID:${targetNode}:demo-${action}-${vmid}-${Date.now()}`,
       type: `${type === 'lxc' ? 'vz' : 'qm'}${action}`,
       vmid: String(vmid),
       user: 'demo@pve',
@@ -1269,7 +1457,7 @@ async function handleDemoRequest(apiPath: string, init?: RequestInit): Promise<R
       endtime: nowSec + 1,
       duration_sec: 1,
     });
-    return jsonResponse({ ok: true, vmid, type, action, upid: 'demo-task-ok' });
+    return jsonResponse({ ok: true, node: targetNode, vmid, type, action, upid: 'demo-task-ok' });
   }
 
   if (path === '/api/services' && method === 'GET') {
@@ -2307,8 +2495,10 @@ export function installApiInterceptor(): void {
   if (typeof window === 'undefined' || interceptorInstalled) return;
   interceptorInstalled = true;
   nativeFetchRef = window.fetch.bind(window);
+  void ensureSecureStorageReady();
 
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    await ensureSecureStorageReady();
     const apiPath = extractApiPath(input);
     const nativeFetch = nativeFetchRef!;
     const tauriActive = isTauriPlatform();
