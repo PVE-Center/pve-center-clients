@@ -2,10 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
   AlertCircle,
+  ArrowUpCircle,
   CheckCircle2,
+  Download,
   HardDrive,
   LayoutGrid,
+  Loader2,
   Plus,
+  RefreshCw,
   Server,
   SlidersHorizontal,
   Sparkles,
@@ -24,6 +28,7 @@ import { AuthLoginModal, ServerConfigModal } from './components/ServerConfigModa
 import { ServiceCard } from './components/ServiceCard';
 import { SetupWizardModal } from './components/SetupWizardModal';
 import { StorageSection } from './components/StorageSection';
+import { UpdatesSection } from './components/UpdatesSection';
 import { UsersSection } from './components/UsersSection';
 import { YamlConfigEditorModal } from './components/YamlConfigEditorModal';
 import {
@@ -55,11 +60,17 @@ import type {
   ServiceHealthStatus,
   ServiceItem,
   SetupStatusResponse,
+  UpdatesOverviewResponse,
   UsersOverview,
   WidgetsMap,
 } from './types';
+import {
+  checkAndInstallDesktopUpdate,
+  isTauriDesktop,
+  type DesktopUpdateCheckResult,
+} from './lib/updater';
 
-type ActiveTab = 'all' | 'storage' | 'services' | 'proxmox' | 'ops' | 'users';
+type ActiveTab = 'all' | 'storage' | 'services' | 'proxmox' | 'ops' | 'updates' | 'users';
 
 export function App() {
   const [theme, setTheme] = useState<ThemePreference>(() => getThemePreference());
@@ -71,6 +82,9 @@ export function App() {
   const [usersOverview, setUsersOverview] = useState<UsersOverview | null>(null);
   const [opsOverview, setOpsOverview] = useState<OpsOverview | null>(null);
   const [incidentsData, setIncidentsData] = useState<IncidentsResponse | null>(null);
+  const [updatesOverview, setUpdatesOverview] = useState<UpdatesOverviewResponse | null>(null);
+  const [desktopUpdateState, setDesktopUpdateState] = useState<DesktopUpdateCheckResult | null>(null);
+  const [checkingDesktopUpdate, setCheckingDesktopUpdate] = useState(false);
   const [onboardingStatus, setOnboardingStatus] = useState<OnboardingStatusResponse | null>(null);
   const [setupStatus, setSetupStatus] = useState<SetupStatusResponse | null>(null);
 
@@ -143,6 +157,11 @@ export function App() {
   const fetchIncidentsOnly = useCallback(async () => {
     const resp = await fetch('/api/incidents?limit=50');
     if (resp.ok) setIncidentsData(await resp.json());
+  }, []);
+
+  const fetchUpdatesOnly = useCallback(async () => {
+    const resp = await fetch('/api/updates/overview');
+    if (resp.ok) setUpdatesOverview(await resp.json());
   }, []);
 
   const fetchServicesOnly = useCallback(async () => {
@@ -226,7 +245,7 @@ export function App() {
         : '/api/pve/overview';
       const pveReqSeq = ++pveReqSeqRef.current;
 
-      const [pveResp, svcResp, csResp, widResp, usrResp, opsResp, incResp, setupResp] =
+      const [pveResp, svcResp, csResp, widResp, usrResp, opsResp, incResp, updResp, setupResp] =
         await Promise.all([
           fetch(pveOverviewUrl),
           fetch('/api/services'),
@@ -235,6 +254,7 @@ export function App() {
           fetch('/api/users'),
           fetch('/api/ops/overview'),
           fetch('/api/incidents?limit=50'),
+          fetch('/api/updates/overview'),
           fetch('/api/setup/status'),
         ]);
 
@@ -256,6 +276,7 @@ export function App() {
       if (usrResp.ok) setUsersOverview(await usrResp.json());
       if (opsResp.ok) setOpsOverview(await opsResp.json());
       if (incResp.ok) setIncidentsData(await incResp.json());
+      if (updResp.ok) setUpdatesOverview(await updResp.json());
       if (setupResp.ok) {
         setSetupStatus((await setupResp.json()) as SetupStatusResponse);
       }
@@ -384,6 +405,8 @@ export function App() {
         }
       } else if (event.type === 'config_reloaded') {
         void fetchAllData();
+      } else if (event.type === 'update_job_progress') {
+        void fetchUpdatesOnly();
       }
     });
 
@@ -658,6 +681,58 @@ export function App() {
   ).length;
   const activeIncidentsCount = incidentsData?.active_count ?? 0;
   const opsAlertCount = pendingSeerrCount + activeIncidentsCount;
+  const availableUpdatesCount = updatesOverview?.summary.updates_available ?? 0;
+
+  const desktopUpdateSlot = isTauriDesktop() ? (
+    <div className="liquid-glass-card flex flex-wrap items-center justify-between gap-3 rounded-3xl p-4 text-xs">
+      <div>
+        <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
+          Mise à jour locale du client Desktop (Tauri v2)
+        </h3>
+        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+          Téléchargement et installation signée depuis GitHub Releases (<code>latest.json</code>).
+        </p>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        {desktopUpdateState?.status === 'available' ? (
+          <button
+            type="button"
+            onClick={() => void desktopUpdateState.install()}
+            className="cider-accent-btn inline-flex items-center gap-1.5 rounded-2xl px-3.5 py-2 font-semibold text-white"
+          >
+            <Download className="h-3.5 w-3.5" />
+            Installer v{desktopUpdateState.version} &amp; Redémarrer
+          </button>
+        ) : (
+          <button
+            type="button"
+            disabled={checkingDesktopUpdate}
+            onClick={() => {
+              setCheckingDesktopUpdate(true);
+              void checkAndInstallDesktopUpdate(false).then((res) => {
+                setDesktopUpdateState(res);
+                setCheckingDesktopUpdate(false);
+              });
+            }}
+            className="liquid-pill inline-flex items-center gap-1.5 rounded-2xl px-3.5 py-2 font-semibold text-slate-700 dark:text-slate-200"
+          >
+            {checkingDesktopUpdate ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <RefreshCw className="h-3.5 w-3.5" />
+            )}
+            Vérifier client Desktop
+          </button>
+        )}
+        {desktopUpdateState?.status === 'up-to-date' && (
+          <span className="text-emerald-600 dark:text-emerald-400">Client à jour</span>
+        )}
+        {desktopUpdateState?.status === 'unavailable' && (
+          <span className="text-amber-600 dark:text-amber-300">{desktopUpdateState.message}</span>
+        )}
+      </div>
+    </div>
+  ) : null;
 
   const navTabs: Array<{
     id: ActiveTab;
@@ -689,6 +764,14 @@ export function App() {
             ? `${pendingSeerrCount} en attente`
             : undefined,
       dot: opsAlertCount > 0,
+    },
+    {
+      id: 'updates',
+      label: 'Mises à jour',
+      shortLabel: 'MAJ',
+      icon: ArrowUpCircle,
+      badge: availableUpdatesCount > 0 ? `${availableUpdatesCount}` : undefined,
+      dot: availableUpdatesCount > 0,
     },
     { id: 'users', label: 'Utilisateurs', shortLabel: 'Comptes', icon: Users },
   ];
@@ -826,6 +909,7 @@ export function App() {
           usersOverview={usersOverview}
           opsOverview={opsOverview}
           incidentsData={incidentsData}
+          updatesOverview={updatesOverview}
           onJumpToTab={(tab) => setActiveTab(tab)}
         />
 
@@ -856,6 +940,16 @@ export function App() {
             onRefreshOps={fetchOpsOnly}
             onRefreshIncidents={fetchIncidentsOnly}
             onToast={setToast}
+          />
+        )}
+
+        {/* Onglet Centre de Mises à Jour Unifié */}
+        {activeTab === 'updates' && (
+          <UpdatesSection
+            overview={updatesOverview}
+            onRefreshUpdates={fetchUpdatesOnly}
+            onToast={setToast}
+            desktopUpdateSlot={desktopUpdateSlot}
           />
         )}
 
