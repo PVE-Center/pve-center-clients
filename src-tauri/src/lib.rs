@@ -4,6 +4,33 @@ use tauri::{
     Manager,
 };
 
+const KEYRING_SERVICE: &str = "io.github.pvepanel.desktop";
+
+#[tauri::command]
+fn keystore_get(key: String) -> Result<Option<String>, String> {
+    let entry = keyring::Entry::new(KEYRING_SERVICE, &key).map_err(|e| e.to_string())?;
+    match entry.get_password() {
+        Ok(value) => Ok(Some(value)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(err) => Err(err.to_string()),
+    }
+}
+
+#[tauri::command]
+fn keystore_set(key: String, value: String) -> Result<(), String> {
+    let entry = keyring::Entry::new(KEYRING_SERVICE, &key).map_err(|e| e.to_string())?;
+    entry.set_password(&value).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn keystore_delete(key: String) -> Result<(), String> {
+    let entry = keyring::Entry::new(KEYRING_SERVICE, &key).map_err(|e| e.to_string())?;
+    match entry.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Err(err) => Err(err.to_string()),
+    }
+}
+
 fn toggle_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         if window.is_visible().unwrap_or(false) {
@@ -26,9 +53,23 @@ fn show_main_window(app: &tauri::AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_shell::init())
+        .invoke_handler(tauri::generate_handler![
+            keystore_get,
+            keystore_set,
+            keystore_delete
+        ]);
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        builder = builder
+            .plugin(tauri_plugin_process::init())
+            .plugin(tauri_plugin_updater::Builder::new().build());
+    }
+
+    builder
         .setup(|app| {
             let show_item = MenuItem::with_id(app, "show", "Show PVE Center", true, None::<&str>)?;
             let hide_item = MenuItem::with_id(app, "hide", "Hide to Tray", true, None::<&str>)?;

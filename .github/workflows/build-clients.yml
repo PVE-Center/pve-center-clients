@@ -66,9 +66,17 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
       - name: Build Tauri bundles (${{ matrix.bundles }})
+        shell: bash
         env:
           APPIMAGE_EXTRACT_AND_RUN: '1'
-        run: npx tauri build --bundles ${{ matrix.bundles }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            npx tauri build --bundles ${{ matrix.bundles }} --config '{"bundle":{"createUpdaterArtifacts":true}}'
+          else
+            npx tauri build --bundles ${{ matrix.bundles }}
+          fi
       - name: Upload Linux packages
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@v4
@@ -76,7 +84,9 @@ jobs:
           name: pve-center-linux-packages
           path: |
             src-tauri/target/release/bundle/appimage/*.AppImage
+            src-tauri/target/release/bundle/appimage/*.sig
             src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/deb/*.sig
       - name: Upload Windows installers
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
@@ -84,7 +94,9 @@ jobs:
           name: pve-center-windows-installers
           path: |
             src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/nsis/*.sig
             src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/bundle/msi/*.sig
 
   android:
     name: Android APK (Capacitor 8)
@@ -132,9 +144,43 @@ jobs:
       - name: Collect release assets
         run: |
           mkdir -p release-assets
-          find release-artifacts -type f \( -name '*.AppImage' -o -name '*.deb' -o -name '*.exe' -o -name '*.msi' -o -name '*.apk' \) -exec mv -v {} release-assets/ \;
+          find release-artifacts -type f \( -name '*.AppImage' -o -name '*.deb' -o -name '*.exe' -o -name '*.msi' -o -name '*.apk' -o -name '*.sig' \) -exec mv -v {} release-assets/ \;
           find release-artifacts -mindepth 1 -type d -empty -delete
           tar -czf release-assets/pve-center-web-dist.tar.gz -C release-artifacts .
+          python3 - "${GITHUB_REF_NAME}" "${GITHUB_REPOSITORY}" <<'PY'
+          import json, os, sys
+          from datetime import datetime, timezone
+
+          tag, repo = sys.argv[1], sys.argv[2]
+          version = tag.lstrip("v")
+          assets = os.listdir("release-assets")
+          sigs = {name[:-4]: name for name in assets if name.endswith(".sig")}
+          platforms = {}
+
+          for binary_name, sig_name in sigs.items():
+              with open(os.path.join("release-assets", sig_name), "r", encoding="utf-8") as f:
+                  signature = f.read().strip()
+              url = f"https://github.com/{repo}/releases/download/{tag}/{binary_name}"
+              entry = {"signature": signature, "url": url}
+              lower = binary_name.lower()
+              if lower.endswith(".appimage"):
+                  platforms["linux-x86_64"] = entry
+              elif lower.endswith(".exe"):
+                  platforms["windows-x86_64"] = entry
+              elif lower.endswith(".msi") and "windows-x86_64" not in platforms:
+                  platforms["windows-x86_64"] = entry
+
+          if platforms:
+              manifest = {
+                  "version": version,
+                  "notes": f"PVE Command Center {tag}",
+                  "pub_date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                  "platforms": platforms,
+              }
+              with open("release-assets/latest.json", "w", encoding="utf-8") as f:
+                  json.dump(manifest, f, indent=2)
+                  f.write("\n")
+          PY
           ls -lh release-assets/
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2

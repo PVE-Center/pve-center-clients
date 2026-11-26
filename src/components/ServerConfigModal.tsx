@@ -2,11 +2,13 @@ import { useState, type FormEvent } from 'react';
 import {
   AlertCircle,
   CheckCircle2,
+  Download,
   Globe,
   KeyRound,
   Loader2,
   Lock,
   Play,
+  RefreshCw,
   Server,
   ShieldCheck,
   Sparkles,
@@ -24,6 +26,12 @@ import {
   setDemoMode,
   setServerUrl,
 } from '../lib/apiClient';
+import { getSecureStorageLabel } from '../lib/secureStorage';
+import {
+  checkAndInstallDesktopUpdate,
+  isTauriDesktop,
+  type DesktopUpdateCheckResult,
+} from '../lib/updater';
 import type { AuthLoginResponse } from '../types';
 
 interface ServerConfigModalProps {
@@ -42,6 +50,9 @@ export function ServerConfigModal({
   const [urlInput, setUrlInput] = useState<string>(() => getServerUrl());
   const [tokenInput, setTokenInput] = useState<string>(() => getAuthToken());
   const [testing, setTesting] = useState(false);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [installingUpdate, setInstallingUpdate] = useState(false);
+  const [updateResult, setUpdateResult] = useState<DesktopUpdateCheckResult | null>(null);
   const [feedback, setFeedback] = useState<{
     type: 'error' | 'success';
     text: string;
@@ -51,7 +62,9 @@ export function ServerConfigModal({
 
   const demoActive = isDemoMode();
   const nativeApp = isNativePlatform();
+  const tauriDesktop = isTauriDesktop();
   const currentServer = getServerUrl();
+  const storageLabel = getSecureStorageLabel();
 
   const handleConnectServer = async (e: FormEvent) => {
     e.preventDefault();
@@ -146,6 +159,28 @@ export function ServerConfigModal({
     }
     setFeedback(null);
     onApplied();
+  };
+
+  const handleCheckUpdate = async () => {
+    setCheckingUpdate(true);
+    setUpdateResult(null);
+    const res = await checkAndInstallDesktopUpdate(false);
+    setUpdateResult(res);
+    setCheckingUpdate(false);
+  };
+
+  const handleInstallUpdate = async () => {
+    if (updateResult?.status !== 'available') return;
+    setInstallingUpdate(true);
+    try {
+      await updateResult.install();
+    } catch (err) {
+      setUpdateResult({
+        status: 'unavailable',
+        message: err instanceof Error ? err.message : 'Échec d’installation de la mise à jour.',
+      });
+      setInstallingUpdate(false);
+    }
   };
 
   return (
@@ -310,6 +345,53 @@ export function ServerConfigModal({
             )}
           </div>
         </form>
+
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-slate-200/80 pt-3 text-[11px] text-slate-500 dark:border-white/10 dark:text-slate-400">
+          <span className="inline-flex items-center gap-1.5">
+            <ShieldCheck className="h-3.5 w-3.5 text-emerald-500 dark:text-emerald-400" />
+            <span>{storageLabel}</span>
+          </span>
+
+          {tauriDesktop && (
+            <div className="flex flex-wrap items-center gap-2">
+              {updateResult?.status === 'available' ? (
+                <button
+                  type="button"
+                  onClick={handleInstallUpdate}
+                  disabled={installingUpdate}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/15 px-3 py-1 font-medium text-emerald-700 transition hover:bg-emerald-500/25 disabled:opacity-50 dark:text-emerald-300"
+                >
+                  {installingUpdate ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <Download className="h-3 w-3" />
+                  )}
+                  Installer v{updateResult.version}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleCheckUpdate}
+                  disabled={checkingUpdate}
+                  className="liquid-pill inline-flex items-center gap-1.5 rounded-full px-3 py-1 font-medium text-slate-600 transition hover:text-slate-900 disabled:opacity-50 dark:text-slate-300 dark:hover:text-white"
+                >
+                  {checkingUpdate ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-3 w-3" />
+                  )}
+                  Mises à jour Desktop
+                </button>
+              )}
+              {updateResult?.status === 'up-to-date' && (
+                <span className="text-emerald-600 dark:text-emerald-400">À jour</span>
+              )}
+              {updateResult?.status === 'unavailable' && (
+                <span className="text-amber-600 dark:text-amber-300">{updateResult.message}</span>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

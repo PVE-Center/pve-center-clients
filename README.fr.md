@@ -178,7 +178,7 @@ pve-center-clients/
 - [x] Wrapper Android Capacitor 8 compatible LAN HTTP et HTTPS Tailscale + compilation CI Gradle
 - [x] Stockage chiffré au repos des identifiants et jetons via WebCrypto AES-256-GCM (`src/lib/secureStorage.ts`) avec migration transparente et repli HTTP LAN
 - [x] Publication automatisée des GitHub Releases sur les tags `v*` (`build-clients.yml` regroupant les artefacts Web, Windows, Linux et Android)
-- [ ] Intégration trousseau OS natif (Tauri Stronghold / Android Keystore) et mises à jour signées (`tauri-plugin-updater`)
+- [x] Intégration trousseau OS natif (`keyring` v3 sous Windows/Linux/macOS + plugin matériel `AndroidKeyStore`) et mises à jour signées (`tauri-plugin-updater` + `scripts/setup-updater-keys.sh`)
 
 ---
 

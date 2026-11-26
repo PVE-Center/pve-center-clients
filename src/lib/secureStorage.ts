@@ -1,22 +1,46 @@
 /**
- * Encrypted at-rest browser/WebView storage for server URLs, API tokens, and session JWTs.
+ * Encrypted at-rest client credential storage for server URLs, API tokens, and session JWTs.
  *
- * Uses WebCrypto AES-256-GCM (`window.crypto.subtle`) when running in a secure context
- * (HTTPS, localhost, Tauri, Capacitor) with a non-extractable key stored in IndexedDB
- * (falling back to a PBKDF2-derived key when IndexedDB is unavailable).
+ * Tiered storage resolution:
+ * 1. Tauri v2 Desktop (`tauri-os-keychain`): OS Credential Manager / Keyring (`keyring` v3 via IPC)
+ * 2. Capacitor 8 Android (`android-keystore`): Hardware-backed AndroidKeyStore AES-256-GCM plugin
+ * 3. Browser / Secure WebView (`webcrypto-aes-gcm`): `window.crypto.subtle` AES-256-GCM + IndexedDB key
+ * 4. Plain HTTP LAN (`fallback-obfuscated`): Synchronous non-blocking payload obfuscation
  *
- * When `crypto.subtle` is unavailable (e.g. plain HTTP LAN access in a browser or WebView),
- * falls back cleanly and non-blockingly to an obfuscated payload format so LAN HTTP
- * never breaks, while transparently migrating any legacy plaintext entries on load.
+ * Automatically migrates legacy `localStorage` plaintext or browser ciphertext into the highest
+ * available native vault on boot without logging the user out.
  */
 
-export type SecureStorageMode = 'webcrypto-aes-gcm' | 'fallback-obfuscated' | 'unavailable';
+import { Capacitor, registerPlugin } from '@capacitor/core';
+
+export type SecureStorageMode =
+  | 'tauri-os-keychain'
+  | 'android-keystore'
+  | 'webcrypto-aes-gcm'
+  | 'fallback-obfuscated'
+  | 'unavailable';
 
 export interface SecureStorageStatus {
   mode: SecureStorageMode;
   initialized: boolean;
   subtleAvailable: boolean;
 }
+
+interface NativeKeystoreBackend {
+  mode: 'tauri-os-keychain' | 'android-keystore';
+  getItem: (key: string) => Promise<string | null>;
+  setItem: (key: string, value: string) => Promise<void>;
+  removeItem: (key: string) => Promise<void>;
+}
+
+interface AndroidNativeKeystorePlugin {
+  getItem(options: { key: string }): Promise<{ value?: string | null }>;
+  setItem(options: { key: string; value: string }): Promise<{ ok?: boolean }>;
+  removeItem(options: { key: string }): Promise<{ ok?: boolean }>;
+}
+
+const AndroidNativeKeystore = registerPlugin<AndroidNativeKeystorePlugin>('NativeKeystore');
+const PROBE_KEY = '__pve_center_probe_v1';
 
 const ENC_PREFIX = 'enc:v1:';
 const OBF_PREFIX = 'obf:v1:';
@@ -34,6 +58,7 @@ const knownKeys = new Set<string>();
 let initPromise: Promise<void> | null = null;
 let initialized = false;
 let activeMode: SecureStorageMode = 'unavailable';
+let nativeBackend: NativeKeystoreBackend | null = null;
 let cachedIdbKey: CryptoKey | null | undefined;
 let cachedDerivedKey: CryptoKey | null | undefined;
 
@@ -44,8 +69,61 @@ function isBrowser(): boolean {
   return typeof window !== 'undefined';
 }
 
+export function isTauriDesktop(): boolean {
+  return isBrowser() && '__TAURI_INTERNALS__' in window;
+}
+
 function hasSubtleCrypto(): boolean {
   return isBrowser() && Boolean(window.crypto?.subtle);
+}
+
+async function detectNativeBackend(): Promise<NativeKeystoreBackend | null> {
+  if (!isBrowser()) return null;
+
+  if (isTauriDesktop()) {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke<string | null>('keystore_get', { key: PROBE_KEY });
+      return {
+        mode: 'tauri-os-keychain',
+        getItem: async (key: string) => {
+          const res = await invoke<string | null>('keystore_get', { key });
+          return typeof res === 'string' && res.length > 0 ? res : null;
+        },
+        setItem: async (key: string, value: string) => {
+          await invoke('keystore_set', { key, value });
+        },
+        removeItem: async (key: string) => {
+          await invoke('keystore_delete', { key });
+        },
+      };
+    } catch {
+      // Headless Linux without a Secret Service daemon falls back cleanly to WebCrypto
+    }
+  }
+
+  try {
+    if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
+      await AndroidNativeKeystore.getItem({ key: PROBE_KEY });
+      return {
+        mode: 'android-keystore',
+        getItem: async (key: string) => {
+          const res = await AndroidNativeKeystore.getItem({ key });
+          return typeof res?.value === 'string' && res.value.length > 0 ? res.value : null;
+        },
+        setItem: async (key: string, value: string) => {
+          await AndroidNativeKeystore.setItem({ key, value });
+        },
+        removeItem: async (key: string) => {
+          await AndroidNativeKeystore.removeItem({ key });
+        },
+      };
+    }
+  } catch {
+    // Fallback cleanly to WebCrypto/obfuscation if AndroidKeyStore is unavailable
+  }
+
+  return null;
 }
 
 function safeLocalStorageGet(key: string): string | null {
@@ -440,46 +518,75 @@ async function decryptPayload(payload: string): Promise<string | null> {
   }
 }
 
-async function hydrateKey(key: string): Promise<void> {
-  const versionAtStart = keyVersions.get(key) ?? 0;
-  const raw = safeLocalStorageGet(key);
-  if (raw === null || raw === '') return;
-
+async function decodeLocalStorageEntry(key: string, raw: string): Promise<string | null> {
   if (raw.startsWith(ENC_PREFIX)) {
     const decrypted = await decryptPayload(raw);
-    if ((keyVersions.get(key) ?? 0) !== versionAtStart) return;
-    if (decrypted !== null) {
-      memoryCache.set(key, decrypted);
-    } else if (hasSubtleCrypto()) {
-      // Unrecoverable ciphertext (e.g., cleared IndexedDB keystore); clear cleanly
+    if (decrypted === null && hasSubtleCrypto()) {
       safeLocalStorageRemove(key);
-      memoryCache.delete(key);
     }
-    return;
+    return decrypted;
   }
 
   if (raw.startsWith(OBF_PREFIX)) {
     const decoded = deobfuscateFallback(raw);
-    if ((keyVersions.get(key) ?? 0) !== versionAtStart) return;
     if (decoded === null) {
       safeLocalStorageRemove(key);
-      memoryCache.delete(key);
-      return;
     }
-    memoryCache.set(key, decoded);
-    if (activeMode === 'webcrypto-aes-gcm') {
-      const upgraded = await encryptPayload(decoded);
-      if ((keyVersions.get(key) ?? 0) === versionAtStart) {
-        safeLocalStorageSet(key, upgraded);
+    return decoded;
+  }
+
+  return raw;
+}
+
+async function hydrateKey(key: string): Promise<void> {
+  const versionAtStart = keyVersions.get(key) ?? 0;
+
+  if (nativeBackend) {
+    try {
+      const nativeVal = await nativeBackend.getItem(key);
+      if ((keyVersions.get(key) ?? 0) !== versionAtStart) return;
+      if (nativeVal !== null && nativeVal !== '') {
+        memoryCache.set(key, nativeVal);
+        safeLocalStorageRemove(key);
+        return;
       }
+    } catch {
+      // Fall through to localStorage recovery below
     }
+  }
+
+  const raw = safeLocalStorageGet(key);
+  if (raw === null || raw === '') return;
+
+  const resolved = await decodeLocalStorageEntry(key, raw);
+  if ((keyVersions.get(key) ?? 0) !== versionAtStart) return;
+  if (resolved === null) {
+    memoryCache.delete(key);
     return;
   }
 
-  // Legacy plaintext value found in localStorage -> cache & migrate at rest immediately
-  if ((keyVersions.get(key) ?? 0) !== versionAtStart) return;
-  memoryCache.set(key, raw);
-  const encrypted = await encryptPayload(raw);
+  memoryCache.set(key, resolved);
+
+  if (nativeBackend) {
+    try {
+      await nativeBackend.setItem(key, resolved);
+      if ((keyVersions.get(key) ?? 0) === versionAtStart) {
+        safeLocalStorageRemove(key);
+      }
+      return;
+    } catch {
+      // Keep localStorage encrypted copy if native store rejects at runtime
+    }
+  }
+
+  if (raw.startsWith(ENC_PREFIX)) {
+    return;
+  }
+  if (raw.startsWith(OBF_PREFIX) && activeMode !== 'webcrypto-aes-gcm') {
+    return;
+  }
+
+  const encrypted = await encryptPayload(resolved);
   if ((keyVersions.get(key) ?? 0) === versionAtStart) {
     safeLocalStorageSet(key, encrypted);
   }
@@ -496,6 +603,17 @@ function enqueuePersist(key: string, value: string, version: number): Promise<vo
         await initPromise;
       }
       if ((keyVersions.get(key) ?? 0) !== version) return;
+      if (nativeBackend) {
+        try {
+          await nativeBackend.setItem(key, value);
+          if ((keyVersions.get(key) ?? 0) === version) {
+            safeLocalStorageRemove(key);
+          }
+          return;
+        } catch {
+          // Fall back to browser encrypted/obfuscated persistence
+        }
+      }
       const encoded = await encryptPayload(value);
       if ((keyVersions.get(key) ?? 0) !== version) return;
       safeLocalStorageSet(key, encoded);
@@ -504,9 +622,34 @@ function enqueuePersist(key: string, value: string, version: number): Promise<vo
   return next;
 }
 
+function enqueueDelete(key: string, version: number): Promise<void> {
+  const prev = keyWriteChains.get(key) ?? Promise.resolve();
+  const next = prev
+    .catch(() => {
+      // Isolate prior task errors
+    })
+    .then(async () => {
+      if (initPromise) {
+        await initPromise;
+      }
+      if ((keyVersions.get(key) ?? 0) !== version) return;
+      safeLocalStorageRemove(key);
+      if (nativeBackend) {
+        try {
+          await nativeBackend.removeItem(key);
+        } catch {
+          // Ignore native keystore delete errors
+        }
+      }
+    });
+  keyWriteChains.set(key, next);
+  return next;
+}
+
 /**
- * Initialize WebCrypto key resolution and transparently migrate/decrypt any persisted
- * entries for `keysToPreload`. Safe to call multiple times; never throws.
+ * Initialize native OS keystore (Tauri Keyring / AndroidKeyStore) or WebCrypto key
+ * resolution and transparently migrate/decrypt any persisted entries for `keysToPreload`.
+ * Safe to call multiple times; never throws.
  */
 export async function initSecureStorage(keysToPreload: string[] = []): Promise<void> {
   for (const key of keysToPreload) {
@@ -521,17 +664,19 @@ export async function initSecureStorage(keysToPreload: string[] = []): Promise<v
 
   if (!initPromise) {
     initPromise = (async () => {
-      const aes = await getPreferredAesKey();
-      if (aes) {
-        activeMode = 'webcrypto-aes-gcm';
+      nativeBackend = await detectNativeBackend();
+      if (nativeBackend) {
+        activeMode = nativeBackend.mode;
       } else {
-        activeMode = 'fallback-obfuscated';
+        const aes = await getPreferredAesKey();
+        activeMode = aes ? 'webcrypto-aes-gcm' : 'fallback-obfuscated';
       }
 
       const initialKeys = Array.from(knownKeys);
       await Promise.all(initialKeys.map((k) => hydrateKey(k)));
       initialized = true;
     })().catch(() => {
+      nativeBackend = null;
       activeMode = hasSubtleCrypto() ? 'webcrypto-aes-gcm' : 'fallback-obfuscated';
       initialized = true;
     });
@@ -540,7 +685,9 @@ export async function initSecureStorage(keysToPreload: string[] = []): Promise<v
   await initPromise;
 
   // Hydrate any keys added after initial init call
-  const missing = keysToPreload.filter((k) => k && !memoryCache.has(k) && safeLocalStorageGet(k) !== null);
+  const missing = keysToPreload.filter(
+    (k) => k && !memoryCache.has(k) && (nativeBackend !== null || safeLocalStorageGet(k) !== null)
+  );
   if (missing.length > 0) {
     await Promise.all(missing.map((k) => hydrateKey(k)));
   }
@@ -563,7 +710,7 @@ export function getSecureItem(key: string): string {
     const decoded = deobfuscateFallback(raw);
     if (decoded === null) return '';
     memoryCache.set(key, decoded);
-    if (hasSubtleCrypto()) {
+    if (nativeBackend || hasSubtleCrypto()) {
       const ver = keyVersions.get(key) ?? 0;
       void enqueuePersist(key, decoded, ver);
     }
@@ -586,7 +733,7 @@ export function getSecureItem(key: string): string {
 
 /**
  * Synchronously update the decrypted in-memory cache and asynchronously encrypt & persist
- * the value at rest.
+ * the value at rest (or store it in native OS keychain / AndroidKeyStore).
  */
 export function setSecureItem(key: string, value: string): void {
   if (!isBrowser() || !key) return;
@@ -597,12 +744,13 @@ export function setSecureItem(key: string, value: string): void {
   if (!value) {
     memoryCache.delete(key);
     safeLocalStorageRemove(key);
+    void enqueueDelete(key, nextVer);
     return;
   }
 
   memoryCache.set(key, value);
-  if (!hasSubtleCrypto()) {
-    // Synchronous write when subtle is unavailable
+  if (!nativeBackend && !isTauriDesktop() && !hasSubtleCrypto() && !Capacitor.isNativePlatform()) {
+    // Synchronous write when running plain HTTP Web PWA without native bridge
     safeLocalStorageSet(key, obfuscateFallback(value));
     return;
   }
@@ -610,7 +758,7 @@ export function setSecureItem(key: string, value: string): void {
 }
 
 /**
- * Update a credential and await its encrypted persistence to storage.
+ * Update a credential and await its encrypted/native persistence to storage.
  */
 export async function setSecureItemAsync(key: string, value: string): Promise<void> {
   if (!isBrowser() || !key) return;
@@ -621,11 +769,15 @@ export async function setSecureItemAsync(key: string, value: string): Promise<vo
   if (!value) {
     memoryCache.delete(key);
     safeLocalStorageRemove(key);
+    await enqueueDelete(key, nextVer);
     return;
   }
 
   memoryCache.set(key, value);
-  if (!hasSubtleCrypto()) {
+  if (initPromise) {
+    await initPromise;
+  }
+  if (!nativeBackend && !hasSubtleCrypto()) {
     safeLocalStorageSet(key, obfuscateFallback(value));
     return;
   }
@@ -633,7 +785,7 @@ export async function setSecureItemAsync(key: string, value: string): Promise<vo
 }
 
 /**
- * Immediately purge a key from memory cache and underlying storage.
+ * Immediately purge a key from memory cache and underlying storage (including native keystore).
  */
 export function removeSecureItem(key: string): void {
   if (!isBrowser() || !key) return;
@@ -641,6 +793,7 @@ export function removeSecureItem(key: string): void {
   keyVersions.set(key, nextVer);
   memoryCache.delete(key);
   safeLocalStorageRemove(key);
+  void enqueueDelete(key, nextVer);
 }
 
 export function getSecureStorageStatus(): SecureStorageStatus {
@@ -649,4 +802,19 @@ export function getSecureStorageStatus(): SecureStorageStatus {
     initialized,
     subtleAvailable: hasSubtleCrypto(),
   };
+}
+
+export function getSecureStorageLabel(): string {
+  switch (activeMode) {
+    case 'tauri-os-keychain':
+      return 'Trousseau OS natif (Keyring)';
+    case 'android-keystore':
+      return 'Android Keystore matériel (AES-GCM)';
+    case 'webcrypto-aes-gcm':
+      return 'WebCrypto AES-256-GCM';
+    case 'fallback-obfuscated':
+      return 'Stockage local obfusqué (HTTP LAN)';
+    default:
+      return 'Mémoire session';
+  }
 }
